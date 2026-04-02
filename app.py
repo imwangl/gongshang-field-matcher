@@ -78,25 +78,25 @@ def search_in_sheet(sheet_name, keyword, search_columns):
                 results.append({'match': cell_value, 'score': 100, 'source': sheet_name})
                 continue
             
-            # 包含匹配（双向）
+            # 包含匹配（双向）- 用户输入包含表中的，或者表中的包含用户输入
             if keyword in cell_value or cell_value in keyword:
                 results.append({'match': cell_value, 'score': 85, 'source': sheet_name})
                 continue
             
-            # 去除后缀匹配
-            for suffix in ["信息", "数据", "记录"]:
-                if cell_value.endswith(suffix):
-                    test_val = cell_value[:-len(suffix)]
-                    if test_val == keyword or keyword == test_val:
-                        results.append({'match': cell_value, 'score': 80, 'source': sheet_name})
-                        break
+            # 部分前缀/后缀匹配（如"基本信息"匹配"工商-基本信息"）
+            # 去掉"工商-"前缀后匹配
+            cell_clean = cell_value.replace("工商-", "").replace("企业", "").replace("公司", "")
+            key_clean = keyword.replace("工商-", "").replace("企业", "").replace("公司", "")
+            if cell_clean in key_clean or key_clean in cell_clean:
+                results.append({'match': cell_value, 'score': 70, 'source': sheet_name})
+                continue
             
             # 语义相似度
             try:
                 sim1 = Levenshtein.ratio(keyword, cell_value)
-                sim2 = Levenshtein.ratio(keyword_normalized, cell_value.replace("信息", "").replace("数据", ""))
+                sim2 = Levenshtein.ratio(key_clean, cell_clean)
                 sim = max(sim1, sim2)
-                if sim >= 0.6:
+                if sim >= 0.5:
                     results.append({'match': cell_value, 'score': int(sim * 100), 'source': sheet_name})
             except:
                 pass
