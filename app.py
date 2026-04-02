@@ -15,51 +15,32 @@ app.config['OUTPUT_FOLDER'] = 'outputs'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
-VERSION = "1.0.2"
-SHEET_ID = "1V6uygE_6POZjS8kHuvtGpWxn5LdpUdwxRg9g87RLWuE"
+VERSION = "1.0.3"
 
-# 缓存数据
-SHEET_CACHE = None
-CACHE_TIME = 0
-CACHE_TTL = 3600  # 缓存1小时
-
+# 使用本地数据文件，不请求Google Sheets
 def get_sheet_data_cached():
-    """从Google Sheets获取数据，使用缓存"""
+    """从本地Excel文件获取数据"""
     global SHEET_CACHE, CACHE_TIME
     
     current_time = time.time()
     
-    # 检查缓存是否有效
+    # 检查缓存
     if SHEET_CACHE is not None and (current_time - CACHE_TIME) < CACHE_TTL:
-        print(f"使用缓存数据，{int(CACHE_TTL - (current_time - CACHE_TIME))}秒后过期")
         return SHEET_CACHE
     
-    # 重新获取数据
-    print("从Google Sheets获取数据...")
-    try:
-        url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/gviz/tq?tqx=out:csv&sheet=%E7%9B%AE%E5%BD%95"
-        response = requests.get(url, timeout=60)
-        
-        if response.status_code == 200:
-            # 解析CSV
-            lines = response.text.strip().split('\n')
-            if len(lines) >= 2:
-                headers = lines[0].split(',')
-                data = []
-                for line in lines[1:]:
-                    if line.strip():
-                        values = line.split(',')
-                        row = {}
-                        for i, h in enumerate(headers):
-                            row[h.strip()] = values[i].strip() if i < len(values) else ''
-                        data.append(row)
-                
-                SHEET_CACHE = data
-                CACHE_TIME = current_time
-                print(f"获取到 {len(data)} 行数据")
-                return data
-    except Exception as e:
-        print(f"获取数据失败: {e}")
+    # 从本地文件读取
+    local_file = os.path.join(os.path.dirname(__file__), 'templates', 'gongshang_data.xlsx')
+    if os.path.exists(local_file):
+        try:
+            df = pd.read_excel(local_file)
+            # 转换为字典列表
+            data = df.to_dict('records')
+            SHEET_CACHE = data
+            CACHE_TIME = current_time
+            print(f"从本地文件读取 {len(data)} 行数据")
+            return data
+        except Exception as e:
+            print(f"读取本地文件失败: {e}")
     
     return []
 
