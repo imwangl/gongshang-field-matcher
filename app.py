@@ -53,13 +53,24 @@ def search_in_sheet(sheet_name, keyword, search_columns):
     keyword = keyword.strip()
     keyword_normalized = keyword.replace("信息", "").replace("数据", "").replace("内容", "")
     
+    # 标准化关键词，去除常见后缀
+    for suffix in ["信息", "数据", "记录", "情况"]:
+        if keyword.endswith(suffix) and len(keyword) > len(suffix) + 2:
+            test_key = keyword[:-len(suffix)]
+            if len(test_key) >= 2:
+                keyword_normalized = test_key
+    
     results = []
     for row in data:
-        for col in search_columns:
-            if col not in row:
-                continue
+        # 对于目录Sheet，搜索D列(对应数据名称)和E列(数据表)
+        if sheet_name == '目录':
+            search_cols = ['对应数据名称', '数据表']
+        else:
+            search_cols = [col for col in row.keys() if col]
+        
+        for col in search_cols:
             cell_value = str(row.get(col, '')).strip()
-            if not cell_value:
+            if not cell_value or cell_value == '':
                 continue
             
             # 精确匹配
@@ -67,14 +78,24 @@ def search_in_sheet(sheet_name, keyword, search_columns):
                 results.append({'match': cell_value, 'score': 100, 'source': sheet_name})
                 continue
             
-            # 包含匹配
+            # 包含匹配（双向）
             if keyword in cell_value or cell_value in keyword:
                 results.append({'match': cell_value, 'score': 85, 'source': sheet_name})
                 continue
             
+            # 去除后缀匹配
+            for suffix in ["信息", "数据", "记录"]:
+                if cell_value.endswith(suffix):
+                    test_val = cell_value[:-len(suffix)]
+                    if test_val == keyword or keyword == test_val:
+                        results.append({'match': cell_value, 'score': 80, 'source': sheet_name})
+                        break
+            
             # 语义相似度
             try:
-                sim = Levenshtein.ratio(keyword_normalized, cell_value.replace("信息", ""))
+                sim1 = Levenshtein.ratio(keyword, cell_value)
+                sim2 = Levenshtein.ratio(keyword_normalized, cell_value.replace("信息", "").replace("数据", ""))
+                sim = max(sim1, sim2)
                 if sim >= 0.6:
                     results.append({'match': cell_value, 'score': int(sim * 100), 'source': sheet_name})
             except:
@@ -88,28 +109,10 @@ def search_in_sheet(sheet_name, keyword, search_columns):
 
 def find_match(user_field):
     """在所有Sheet中查找匹配"""
-    # 搜索顺序：目录 -> 其他Sheet -> Sheet1
-    search_order = [
-        ('目录', ['D', 'C']),  # 目录Sheet的D列是中文表名
-        ('开庭公告', ['A']),
-        ('法院公告', ['A']),
-        ('终本案件', ['A']),
-        ('限制消费令', ['A']),
-        ('法律诉讼', ['A']),
-        ('破产重整', ['A']),
-        ('被执行信息', ['A']),
-        ('失信信息', ['A']),
-        ('股权出质', ['A']),
-        ('动产抵押', ['A']),
-        ('经营异常', ['A']),
-        ('行政��罚', ['A']),
-        ('Sheet1', ['A', 'B']),  # Sheet1的A列是英文表名，B列是中文表名
-    ]
-    
-    for sheet_name, cols in search_order:
-        result = search_in_sheet(sheet_name, user_field, cols)
-        if result:
-            return result
+    # 搜索顺序：先搜目录Sheet
+    result = search_in_sheet('目录', user_field, ['对应数据名称', '数据表'])
+    if result:
+        return result
     
     return None
 
