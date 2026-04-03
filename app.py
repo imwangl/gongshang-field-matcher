@@ -85,6 +85,43 @@ def load_sheet_g():
 # 启动时加载数据
 load_match_data()
 
+def parse_user_fields(filepath):
+    """解析用户上传的文件"""
+    ext = os.path.splitext(filepath)[1].lower()
+    fields = []
+    
+    if ext in ['.xlsx', '.xls']:
+        df = pd.read_excel(filepath)
+        # 假设第一列是字段名
+        fields = df.iloc[1:, 0].dropna().astype(str).tolist()
+        fields = [x.strip() for x in fields if x.strip()]
+    elif ext in ['.txt']:
+        with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                # 清理
+                line = line.rstrip('；').rstrip(';')
+                if '；' in line or ';' in line:
+                    line = line.replace(';', '、').replace('；', '、')
+                # 结构化格式 "1、公司概况：基本信息、联系方式"
+                match = re.match(r'^\d+、[^：]+：(.+)$', line)
+                if match:
+                    content = match.group(1)
+                    parts = content.split('、')
+                    fields.extend([p.strip() for p in parts if p.strip()])
+                else:
+                    for sep in ['、', '，', ',']:
+                        if sep in line:
+                            fields.extend([p.strip() for p in line.split(sep) if p.strip()])
+                            break
+                    else:
+                        if line.strip():
+                            fields.append(line.strip())
+    
+    return fields
+
 def clean_text(s):
     """清理文本"""
     return s.replace('工商-', '').replace('企业', '').replace('公司', '').replace('信息', '').replace('数据', '').replace('记录', '').replace(' ', '').strip()
