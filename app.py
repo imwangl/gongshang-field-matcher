@@ -39,6 +39,7 @@ def load_match_data():
                 TARGET_LIST = df['对应数据名称'].dropna().astype(str).tolist()
                 TARGET_LIST = [x.strip() for x in TARGET_LIST if x.strip()]
                 print(f"目录对应数据名称: {len(TARGET_LIST)} 条")
+                print(f"前5条: {TARGET_LIST[:5]}")
         
         # 每个sheet的G列
         for sheet in xl.sheet_names:
@@ -53,8 +54,9 @@ def load_match_data():
                     g_data = [x.strip() for x in g_data if x.strip() and len(x) > 1]
                     if g_data:
                         SHEET_G[sheet] = g_data
+                        print(f"{sheet} G列: {len(g_data)} 条")
             except Exception as e:
-                pass
+                print(f"加载{sheet}失败: {e}")
         
         print(f"总Sheet数: {len(SHEET_G)}")
     
