@@ -1,11 +1,9 @@
 import os
 import io
 import re
-import json
 import time
 import pandas as pd
 from flask import Flask, render_template, request, send_file, jsonify
-import requests
 import Levenshtein
 
 app = Flask(__name__)
@@ -15,88 +13,54 @@ app.config['OUTPUT_FOLDER'] = 'outputs'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
-VERSION = "1.0.3"
+VERSION = "1.1.0"
 
-# 使用本地数据文件，不请求Google Sheets
-def get_sheet_data_cached():
-    """从本地Excel文件获取数据"""
-    global SHEET_CACHE, CACHE_TIME
-    
-    current_time = time.time()
-    
-    # 检查缓存
-    if SHEET_CACHE is not None and (current_time - CACHE_TIME) < CACHE_TTL:
-        return SHEET_CACHE
-    
-    # 从本地文件读取
-    local_file = os.path.join(os.path.dirname(__file__), 'templates', 'gongshang_data.xlsx')
-    if os.path.exists(local_file):
-        try:
-            df = pd.read_excel(local_file)
-            # 转换为字典列表
-            data = df.to_dict('records')
-            SHEET_CACHE = data
-            CACHE_TIME = current_time
-            print(f"从本地文件读取 {len(data)} 行数据")
-            return data
-        except Exception as e:
-            print(f"读取本地文件失败: {e}")
-    
-    return []
+# 加载匹配数据
+SHEET2_D = []  # Sheet2的D列
+SHEET_G = {}   # Sheet3+的G列，key是sheet名
 
-def search_in_sheet(keyword):
-    """在目录Sheet中搜索关键词"""
-    data = get_sheet_data_cached()
-    if not data:
-        return None
+def load_match_data():
+    """加载匹配数据"""
+    global SHEET2_D, SHEET_G
     
-    keyword = keyword.strip()
-    keyword_normalized = keyword.replace("信息", "").replace("数据", "").replace("内容", "")
+    local_file = os.path.join(os.path.dirname(__file__), 'templates', '工商库.xlsx')
+    if not os.path.exists(local_file):
+        print("本地文件不存在")
+        return
     
-    results = []
-    for row in data:
-        search_cols = ['对应数据名称', '数据表']
+    try:
+        xl = pd.ExcelFile(local_file)
+        print(f"工作表: {xl.sheet_names[:10]}")
         
-        for col in search_cols:
-            cell_value = str(row.get(col, '')).strip()
-            if not cell_value or cell_value == '':
-                continue
-            
-            # 精确匹配
-            if cell_value == keyword:
-                results.append({'match': cell_value, 'score': 100, 'source': '目录'})
-                continue
-            
-            # 包含匹配（双向）
-            if keyword in cell_value or cell_value in keyword:
-                results.append({'match': cell_value, 'score': 85, 'source': '目录'})
-                continue
-            
-            # 部分前缀/后缀匹配
-            cell_clean = cell_value.replace("工商-", "").replace("企业", "").replace("公司", "")
-            key_clean = keyword.replace("工商-", "").replace("企业", "").replace("公司", "")
-            if cell_clean in key_clean or key_clean in cell_clean:
-                results.append({'match': cell_value, 'score': 70, 'source': '目录'})
-                continue
-            
-            # ��义相似度
-            try:
-                sim1 = Levenshtein.ratio(keyword, cell_value)
-                sim2 = Levenshtein.ratio(key_clean, cell_clean)
-                sim = max(sim1, sim2)
-                if sim >= 0.5:
-                    results.append({'match': cell_value, 'score': int(sim * 100), 'source': '目录'})
-            except:
-                pass
+        # Sheet2的D列
+        if 'Sheet2' in xl.sheet_names:
+            df2 = pd.read_excel(local_file, sheet_name='Sheet2')
+            if 'D' in df2.columns:
+                SHEET2_D = df2['D'].dropna().astype(str).tolist()
+                SHEET2_D = [x.strip() for x in SHEET2_D if x.strip()]
+                print(f"Sheet2 D列: {len(SHEET2_D)} 条")
+        
+        # Sheet3及以后，每个sheet的G列
+        for sheet in xl.sheet_names:
+            if sheet.startswith('Sheet') and sheet != 'Sheet2':
+                try:
+                    df = pd.read_excel(local_file, sheet_name=sheet)
+                    if 'G' in df.columns:
+                        g_data = df['G'].dropna().astype(str).tolist()
+                        g_data = [x.strip() for x in g_data if x.strip()]
+                        if g_data:
+                            SHEET_G[sheet] = g_data
+                            print(f"{sheet} G列: {len(g_data)} 条")
+                except:
+                    pass
+        
+        print(f"总Sheet数: {len(SHEET_G)}")
     
-    if results:
-        results.sort(key=lambda x: x['score'], reverse=True)
-        return results[0]
-    return None
+    except Exception as e:
+        print(f"加载失败: {e}")
 
-def find_match(user_field):
-    """查找匹配"""
-    return search_in_sheet(user_field)
+# 启动时加载数据
+load_match_data()
 
 def parse_user_fields(filepath):
     """解析用户上传的文件"""
@@ -105,18 +69,20 @@ def parse_user_fields(filepath):
     
     if ext in ['.xlsx', '.xls']:
         df = pd.read_excel(filepath)
-        fields = df.iloc[1:, 0].dropna().tolist()
+        # 假设第一列是字段名
+        fields = df.iloc[1:, 0].dropna().astype(str).tolist()
+        fields = [x.strip() for x in fields if x.strip()]
     elif ext in ['.txt']:
         with open(filepath, 'r', encoding='utf-8', errors='ignore') as f:
             for line in f:
                 line = line.strip()
                 if not line:
                     continue
-                
+                # 清理
                 line = line.rstrip('；').rstrip(';')
                 if '；' in line or ';' in line:
                     line = line.replace(';', '、').replace('；', '、')
-                
+                # 结构化格式 "1、公司概况：基本信息、联系方式"
                 match = re.match(r'^\d+、[^：]+：(.+)$', line)
                 if match:
                     content = match.group(1)
@@ -133,6 +99,55 @@ def parse_user_fields(filepath):
     
     return fields
 
+def find_match(user_field):
+    """匹配字段"""
+    user_field = str(user_field).strip()
+    if not user_field:
+        return None
+    
+    user_clean = user_field.replace("信息", "").replace("数据", "").replace("记录", "").replace(" ", "")
+    
+    # 1. 先匹配Sheet2的D列
+    for target in SHEET2_D:
+        target = str(target).strip()
+        if not target:
+            continue
+        
+        # 精确匹配
+        if user_field == target:
+            return {'matched': target, 'source': 'Sheet2-D', 'type': '完全匹配', 'score': 100}
+        
+        # 语义相似
+        try:
+            sim1 = Levenshtein.ratio(user_field, target)
+            sim2 = Levenshtein.ratio(user_clean, target.replace("信息", "").replace("数据", ""))
+            sim = max(sim1, sim2)
+            if sim >= 0.7:
+                return {'matched': target, 'source': 'Sheet2-D', 'type': '推荐', 'score': int(sim*100)}
+        except:
+            pass
+    
+    # 2. 再匹配Sheet3+的G列
+    for sheet_name, g_data in SHEET_G.items():
+        for target in g_data:
+            target = str(target).strip()
+            if not target:
+                continue
+            
+            if user_field == target:
+                return {'matched': target, 'source': f'{sheet_name}-G', 'type': '完全匹配', 'score': 100}
+            
+            try:
+                sim1 = Levenshtein.ratio(user_field, target)
+                sim2 = Levenshtein.ratio(user_clean, target.replace("信息", "").replace("数据", ""))
+                sim = max(sim1, sim2)
+                if sim >= 0.7:
+                    return {'matched': target, 'source': f'{sheet_name}-G', 'type': '推荐', 'score': int(sim*100)}
+            except:
+                pass
+    
+    return None
+
 @app.route('/')
 def index():
     return render_template('index.html', version=VERSION)
@@ -144,13 +159,11 @@ def download_template(type):
         output = io.BytesIO()
         df.to_excel(output, index=False)
         output.seek(0)
-        return send_file(output, download_name='工商字段匹配模板.xlsx', as_attachment=True)
+        return send_file(output, download_name='模板.xlsx', as_attachment=True)
     elif type == 'txt':
-        content = """1、公司概况：基本信息、联系方式、变更记录、主要人员；
-2、股东和对外投资：股东信息、对外投资；
-"""
+        content = "1、公司概况：基本信息、联系方式、变更记录、主要人员；\n2、股东信息：股东信息、对外投资；"
         output = io.BytesIO(content.encode('utf-8'))
-        return send_file(output, download_name='工商字段匹配模板.txt', as_attachment=True)
+        return send_file(output, download_name='模板.txt', as_attachment=True)
     return "模板不存在", 404
 
 @app.route('/match', methods=['POST'])
@@ -168,7 +181,6 @@ def match_fields():
         
         # 解析字段
         user_fields = parse_user_fields(filepath)
-        
         if not user_fields:
             return jsonify({'error': '未能解析出字段'}), 400
         
@@ -178,24 +190,19 @@ def match_fields():
             result = find_match(field)
             
             if result:
-                score = result['score']
-                if score == 100:
-                    match_type = '完全匹配'
-                else:
-                    match_type = '推荐'
                 results.append({
                     'user_field': field,
-                    'matched': result['match'],
+                    'matched': result['matched'],
                     'source': result['source'],
-                    'match_type': match_type,
-                    'score': score
+                    'match_type': result['type'],
+                    'score': result['score']
                 })
             else:
                 results.append({
                     'user_field': field,
                     'matched': '-',
                     'source': '-',
-                    'match_type': '匹配不到',
+                    'match_type': '匹配失���',
                     'score': 0
                 })
         
@@ -203,7 +210,7 @@ def match_fields():
         total = len(results)
         exact = len([r for r in results if r['match_type'] == '完全匹配'])
         recommend = len([r for r in results if r['match_type'] == '推荐'])
-        no_match = len([r for r in results if r['match_type'] == '匹配不到'])
+        failed = len([r for r in results if r['match_type'] == '匹配失败'])
         
         # 保存结果
         result_df = pd.DataFrame(results)
@@ -217,7 +224,7 @@ def match_fields():
         
         return jsonify({
             'success': True,
-            'stats': {'total': total, 'exact': exact, 'recommend': recommend, 'no_match': no_match},
+            'stats': {'total': total, 'exact': exact, 'recommend': recommend, 'failed': failed},
             'results': results[:100]
         })
     
