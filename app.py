@@ -13,16 +13,14 @@ app.config['OUTPUT_FOLDER'] = 'outputs'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
-VERSION = "1.1.5"
+VERSION = "1.2.0"
 
-# 加载匹配数据
+# 加载匹配数据（只加载目录，暂不加载G列）
 TARGET_LIST = []  # 目录sheet的D列（对应数据名称）
-SHEET_G = {}      # 每个sheet的G列
-SHEET_G_LOADED = False  # G列是否已加载
 
 def load_match_data():
-    """加载匹配数据"""
-    global TARGET_LIST, SHEET_G, SHEET_G_LOADED
+    """加载匹配数据 - 只加载目录"""
+    global TARGET_LIST
     
     local_file = os.path.join(os.path.dirname(__file__), 'templates', '工商库.xlsx')
     if not os.path.exists(local_file):
@@ -42,45 +40,10 @@ def load_match_data():
                 print(f"目录对应数据名称: {len(TARGET_LIST)} 条")
                 print(f"前5条: {TARGET_LIST[:5]}")
         
-        # G列延迟加载，不在启动时加载
-        print("G列数据将延迟加载")
-        SHEET_G_LOADED = False
+        print("只使用目录数据匹配")
     
     except Exception as e:
         print(f"加载失败: {e}")
-
-def load_sheet_g():
-    """延迟加载G列数据"""
-    global SHEET_G, SHEET_G_LOADED
-    
-    if SHEET_G_LOADED:
-        return
-    
-    local_file = os.path.join(os.path.dirname(__file__), 'templates', '工商库.xlsx')
-    if not os.path.exists(local_file):
-        return
-    
-    try:
-        xl = pd.ExcelFile(local_file)
-        for sheet in xl.sheet_names:
-            if sheet == '目录' or sheet == 'Sheet1':
-                continue
-            try:
-                df = pd.read_excel(local_file, sheet_name=sheet)
-                if len(df.columns) >= 7:
-                    g_col = df.columns[6]
-                    g_data = df[g_col].dropna().astype(str).tolist()
-                    g_data = [x.strip() for x in g_data if x.strip() and len(x) > 1]
-                    if g_data:
-                        SHEET_G[sheet] = g_data
-                        print(f"{sheet} G列: {len(g_data)} 条")
-            except Exception as e:
-                print(f"加载{sheet}失败: {e}")
-        
-        SHEET_G_LOADED = True
-        print(f"总Sheet数: {len(SHEET_G)}")
-    except Exception as e:
-        print(f"加载G列失败: {e}")
 
 # 启动时加载数据
 load_match_data()
@@ -127,14 +90,14 @@ def clean_text(s):
     return s.replace('工商-', '').replace('企业', '').replace('公司', '').replace('信息', '').replace('数据', '').replace('记录', '').replace(' ', '').strip()
 
 def find_match(user_field):
-    """匹配字段"""
+    """匹配字段 - 只用目录数据"""
     user_field = str(user_field).strip()
     if not user_field:
         return None
     
     user_clean = clean_text(user_field)
     
-    # 1. 先匹配目录的"对应数据名称"
+    # 只匹配目录的"对应数据名称"
     for target in TARGET_LIST:
         target = str(target).strip()
         if not target:
@@ -153,28 +116,6 @@ def find_match(user_field):
                 return {'matched': target, 'source': '目录', 'type': '推荐', 'score': int(sim*100)}
         except:
             pass
-    
-    # 2. 延迟加载G列
-    load_sheet_g()
-    
-    # 3. 再匹配每个sheet的G列
-    for sheet_name, g_data in SHEET_G.items():
-        for target in g_data:
-            target = str(target).strip()
-            if not target:
-                continue
-            
-            target_clean = clean_text(target)
-            
-            if user_field == target or user_clean == target_clean:
-                return {'matched': target, 'source': sheet_name, 'type': '完全匹配', 'score': 100}
-            
-            try:
-                sim = Levenshtein.ratio(user_clean, target_clean)
-                if sim >= 0.7:
-                    return {'matched': target, 'source': sheet_name, 'type': '推荐', 'score': int(sim*100)}
-            except:
-                pass
     
     return None
 
