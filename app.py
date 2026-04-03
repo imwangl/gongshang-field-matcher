@@ -18,10 +18,11 @@ VERSION = "1.1.1"
 # 加载匹配数据
 TARGET_LIST = []  # 目录sheet的D列（对应数据名称）
 SHEET_G = {}      # 每个sheet的G列
+SHEET_G_LOADED = False  # G列是否已加载
 
 def load_match_data():
     """加载匹配数据"""
-    global TARGET_LIST, SHEET_G
+    global TARGET_LIST, SHEET_G, SHEET_G_LOADED
     
     local_file = os.path.join(os.path.dirname(__file__), 'templates', '工商库.xlsx')
     if not os.path.exists(local_file):
@@ -41,15 +42,33 @@ def load_match_data():
                 print(f"目录对应数据名称: {len(TARGET_LIST)} 条")
                 print(f"前5条: {TARGET_LIST[:5]}")
         
-        # 每个sheet的G列
+        # G列延迟加载，不在启动时加载
+        print("G列数据将延迟加载")
+        SHEET_G_LOADED = False
+    
+    except Exception as e:
+        print(f"加载失败: {e}")
+
+def load_sheet_g():
+    """延迟加载G列数据"""
+    global SHEET_G, SHEET_G_LOADED
+    
+    if SHEET_G_LOADED:
+        return
+    
+    local_file = os.path.join(os.path.dirname(__file__), 'templates', '工商库.xlsx')
+    if not os.path.exists(local_file):
+        return
+    
+    try:
+        xl = pd.ExcelFile(local_file)
         for sheet in xl.sheet_names:
             if sheet == '目录' or sheet == 'Sheet1':
                 continue
             try:
                 df = pd.read_excel(local_file, sheet_name=sheet)
-                # 找包含"数据"或"字段"的列，或者直接用G列（第7列）
                 if len(df.columns) >= 7:
-                    g_col = df.columns[6]  # G列
+                    g_col = df.columns[6]
                     g_data = df[g_col].dropna().astype(str).tolist()
                     g_data = [x.strip() for x in g_data if x.strip() and len(x) > 1]
                     if g_data:
@@ -58,10 +77,10 @@ def load_match_data():
             except Exception as e:
                 print(f"加载{sheet}失败: {e}")
         
+        SHEET_G_LOADED = True
         print(f"总Sheet数: {len(SHEET_G)}")
-    
     except Exception as e:
-        print(f"加载失败: {e}")
+        print(f"加载G列失败: {e}")
 
 # 启动时加载数据
 load_match_data()
@@ -98,7 +117,10 @@ def find_match(user_field):
         except:
             pass
     
-    # 2. 再匹配每个sheet的G列
+    # 2. 延迟加载G列
+    load_sheet_g()
+    
+    # 3. 再匹配每个sheet的G列
     for sheet_name, g_data in SHEET_G.items():
         for target in g_data:
             target = str(target).strip()
