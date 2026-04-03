@@ -193,7 +193,12 @@
                 method: 'POST',
                 body: formData
             })
-            .then(r => r.json())
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => { throw new Error(text || '服务器错误'); });
+                }
+                return response.json();
+            })
             .then(data => {
                 document.getElementById('loading').classList.remove('show');
                 document.getElementById('submit-btn').disabled = false;

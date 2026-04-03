@@ -13,7 +13,7 @@ app.config['OUTPUT_FOLDER'] = 'outputs'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs(app.config['OUTPUT_FOLDER'], exist_ok=True)
 
-VERSION = "1.1.1"
+VERSION = "1.1.5"
 
 # 加载匹配数据
 TARGET_LIST = []  # 目录sheet的D列（对应数据名称）
